@@ -88,76 +88,30 @@ def download_and_format_readme():
     except subprocess.CalledProcessError as e:
         return {'error': str(e)}
 
-def execute_excel_formula(formula: str = Form(...)):
+def execute_excel_formula(formula: str = Form(...), data: str = Form(...)):
     try:
-        # Create a new Excel workbook and sheet
-        wb = openpyxl.Workbook()
-        ws = wb.active
+        # Convert the data string to a list of integers
+        data = list(map(int, data.split(',')))
 
-        # Sample data to be used in the formula
-        data = [14,4,2,1,11,2,10,2,12,13,14,8,10,4,11,0]
-        for i, value in enumerate(data, start=1):
-            ws.cell(row=1, column=i, value=value)
-
-        # Write the formula to a cell
-        ws['A2'] = formula
-
-        # Save the workbook to a temporary file
-        file_location = "/tmp/formula.xlsx"
-        wb.save(file_location)
-
-        # Open the workbook and evaluate the formula
-        wb = openpyxl.load_workbook(file_location, data_only=True)
-        ws = wb.active
-        result = ws['A2'].value
+        # Evaluate the formula using Python
+        result = eval(formula)
 
         return {"result": result}
     except Exception as e:
         return {"error": str(e)}
 
-def write_google_sheets_formula(formula: str):
+def write_google_sheets_formula(formula: str, data: str):
     try:
-        # Create a new Excel workbook and sheet
-        wb = openpyxl.Workbook()
-        ws = wb.active
+        # Convert the data string to a list of integers
+        data = list(map(int, data.split(',')))
 
-        # Write the formula to a cell
-        ws['A1'] = formula
-
-        # Save the workbook to a temporary file
-        file_location = "/tmp/google_sheets_formula.xlsx"
-        wb.save(file_location)
-
-        return {"message": "Formula written to Excel file", "file_location": file_location}
-    except Exception as e:
-        return {"error": str(e)}
-
-def write_excel_formula(formula: str):
-    try:
-        # Create a new Excel workbook and sheet
-        wb = openpyxl.Workbook()
-        ws = wb.active
-
-        # Sample data to be used in the formula
-        data = [14,4,2,1,11,2,10,2,12,13,14,8,10,4,11,0]
-        for i, value in enumerate(data, start=1):
-            ws.cell(row=1, column=i, value=value)
-
-        # Write the formula to a cell
-        ws['A2'] = formula
-
-        # Save the workbook to a temporary file
-        file_location = "/tmp/formula.xlsx"
-        wb.save(file_location)
-
-        # Open the workbook and evaluate the formula
-        wb = openpyxl.load_workbook(file_location, data_only=True)
-        ws = wb.active
-        result = ws['A2'].value
+        # Evaluate the formula using Python
+        result = eval(formula)
 
         return {"result": result}
     except Exception as e:
         return {"error": str(e)}
+
 
 def count_weekdays_in_range(start_date: str, end_date: str, weekday: str) -> int:
     try:
@@ -505,6 +459,8 @@ print(f'Average steps: {average_steps}')
 '''
     return markdown_content
 
+import base64
+
 def compress_image(image_path: str, output_path: str):
     from PIL import Image
     import os
@@ -517,6 +473,12 @@ def compress_image(image_path: str, output_path: str):
     # Check the file size
     if os.path.getsize(output_path) > 1500:
         raise ValueError('Compressed image size exceeds 1,500 bytes')
+
+    # Convert the compressed image to base64 encoding
+    with open(output_path, 'rb') as img_file:
+        base64_encoded = base64.b64encode(img_file.read()).decode('utf-8')
+
+    return base64_encoded
 
 def publish_github_pages(email: str, github_token: str, repo_name: str):
     try:
@@ -556,14 +518,15 @@ def publish_github_pages(email: str, github_token: str, repo_name: str):
         pages_url = f"https://{user.login}.github.io/{repo_name}/"
         return {"pages_url": pages_url}
     except Exception as e:
-        return {"error": str(e)}
+        return {'error': str(e)}
 
 def run_colab_code():
     import hashlib
     import requests
-    # from google.colab import auth
+    import google.auth
     from oauth2client.client import GoogleCredentials
 
+    from google.colab import auth
     auth.authenticate_user()
     creds = GoogleCredentials.get_application_default()
     token = creds.get_access_token().access_token
@@ -604,6 +567,195 @@ def get_marks(name: str):
     marks = [data.get(n, 0) for n in name.split(',')]
     return {"marks": marks}
 
+import docker
+
+def create_and_push_docker_image(dockerhub_username: str, dockerhub_password: str, repo_name: str, tag: str = '23ds1000022') -> str:
+    try:
+        client = docker.from_env()
+
+        # Build the Docker image
+        image, build_logs = client.images.build(path='.', tag=f'{dockerhub_username}/{repo_name}:{tag}')
+
+        # Log in to Docker Hub
+        client.login(username=dockerhub_username, password=dockerhub_password)
+
+        # Push the Docker image
+        push_logs = client.images.push(dockerhub_username, repo_name, tag=tag)
+
+        # Return the Docker image URL
+        docker_image_url = f'https://hub.docker.com/repository/docker/{dockerhub_username}/{repo_name}/general'
+        return docker_image_url
+    except Exception as e:
+        return {'error': str(e)}
+
+import subprocess
+
+def download_and_run_llamafile_model():
+    try:
+        # Download Llamafile
+        subprocess.run(['curl', '-o', 'Llamafile', 'https://example.com/Llamafile'], check=True)
+        subprocess.run(['chmod', '+x', 'Llamafile'], check=True)
+
+        # Run the Llama-3.2-1B-Instruct.Q6_K.llamafile model
+        subprocess.run(['./Llamafile', 'run', 'Llama-3.2-1B-Instruct.Q6_K.llamafile'], check=True)
+
+        # Create a tunnel to the Llamafile server using ngrok
+        ngrok_process = subprocess.Popen(['ngrok', 'http', '8000'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        ngrok_url = None
+        while True:
+            output = ngrok_process.stdout.readline().decode('utf-8')
+            if 'url=' in output:
+                ngrok_url = output.split('url=')[1].strip()
+                break
+
+        return {'ngrok_url': ngrok_url}
+    except Exception as e:
+        return {'error': str(e)}
+
+import httpx
+
+def analyze_sentiment():
+    url = "https://api.openai.com/v1/engines/gpt-4o-mini/completions"
+    headers = {
+        "Authorization": "Bearer dummy_api_key",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": "Analyze the sentiment of the text into GOOD, BAD, or NEUTRAL."},
+            {"role": "user", "content": "j\nuCucnWF2maKq9ocMq2Ic WjXaN5 1XXI ubwVfqle  EWW"}
+        ]
+    }
+    response = httpx.post(url, json=data, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+@app.post("/api/analyze_sentiment_code")
+def get_analyze_sentiment_code():
+    code = '''
+import httpx
+
+def analyze_sentiment():
+    url = "https://api.openai.com/v1/engines/gpt-4o-mini/completions"
+    headers = {
+        "Authorization": "Bearer dummy_api_key",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": "Analyze the sentiment of the text into GOOD, BAD, or NEUTRAL."},
+            {"role": "user", "content": "j\nuCucnWF2maKq9ocMq2Ic WjXaN5 1XXI ubwVfqle  EWW"}
+        ]
+    }
+    response = httpx.post(url, json=data, headers=headers)
+    response.raise_for_status()
+    return response.json()
+    '''
+    return {"code": code}
+
+import tiktoken
+
+def count_tokens_and_valid_words(text: str):
+    try:
+        # Initialize the tokenizer
+        enc = tiktoken.get_encoding("gpt-4o-mini")
+
+        # Tokenize the text
+        tokens = enc.encode(text)
+        num_tokens = len(tokens)
+
+        # Extract valid English words
+        words = text.split(', ')
+        valid_words = [word for word in words if word.isalpha()]
+
+        return {"num_tokens": num_tokens, "valid_words": valid_words}
+    except Exception as e:
+        return {"error": str(e)}
+
+def llm_text_extraction():
+    json_body = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {
+                "role": "system",
+                "content": "Respond in JSON"
+            },
+            {
+                "role": "user",
+                "content": "Generate 10 random addresses in the US"
+            }
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "generate_us_addresses",
+                    "description": "Generates 10 random addresses in the United States.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "addresses": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "zip": {
+                                            "type": "number",
+                                            "description": "The ZIP code of the address."
+                                        },
+                                        "city": {
+                                            "type": "string",
+                                            "description": "The city of the address."
+                                        },
+                                        "apartment": {
+                                            "type": "string",
+                                            "description": "The apartment or street address."
+                                        }
+                                    },
+                                    "required": ["zip", "city", "apartment"],
+                                    "additionalProperties": False
+                                }
+                            }
+                        },
+                        "required": ["addresses"],
+                        "additionalProperties": False
+                    }
+                }
+            }
+        ]
+    }
+    return json_body
+
+import base64
+from fastapi import UploadFile
+
+def llm_text_extraction_with_image(file: UploadFile):
+    try:
+        # Read the image file and encode it to base64
+        image_data = file.file.read()
+        base64_encoded_image = base64.b64encode(image_data).decode('utf-8')
+
+        json_body = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Extract text from this image"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{base64_encoded_image}"}
+                        }
+                    ]
+                }
+            ]
+        }
+        return json_body
+    except Exception as e:
+        return {"error": str(e)}
+
 functions_dict = {
     "send_request": send_request,
     "find_hidden_input": find_hidden_input,
@@ -611,7 +763,6 @@ functions_dict = {
     "execute_excel_formula": execute_excel_formula,
     "download_and_format_readme": download_and_format_readme,
     "write_google_sheets_formula": write_google_sheets_formula,
-    "write_excel_formula": write_excel_formula,
     "count_weekdays_in_range": count_weekdays_in_range,
     "get_answer_from_csv": get_answer_from_csv,
     "sort_json_array": sort_json_array,
@@ -628,33 +779,24 @@ functions_dict = {
     "publish_github_pages": publish_github_pages,
     "run_colab_code": run_colab_code,
     "count_light_pixels": count_light_pixels,
-    "get_marks": get_marks
+    "get_marks": get_marks,
+    "create_and_push_docker_image": create_and_push_docker_image,
+    "download_and_run_llamafile_model": download_and_run_llamafile_model,
+    "analyze_sentiment": analyze_sentiment,
+    "count_tokens_and_valid_words": count_tokens_and_valid_words,
+    "llm_text_extraction": llm_text_extraction,
+    "llm_text_extraction_with_image": llm_text_extraction_with_image
 }
 
 function_descriptions = [
     "Run VSCode",
     "Send a request",
     "Execute an Excel formula",
-    "Download and format README",
-    "Write Google Sheets formula",
-    "Write Excel formula",
-    "Count weekdays in range",
-    "Get answer from CSV",
-    "Sort JSON array",
-    "Convert to JSON and hash",
-    "Sum data-value attributes",
-    "Sum values from files",
-    "Create GitHub repo and commit",
-    "Replace IITM with IIT Madras and calculate sha256sum",
-    "Calculate total sales for specified ticket type",
-    "Compare lines between files",
-    "Process and rename files and calculate sha256sum",
-    "Generate Markdown documentation",
-    "Compress an image losslessly to less than 1,500 bytes",
-    "Publish a page using GitHub Pages that showcases your work",
-    "Run a program on Google Colab to get a 5-character string",
-    "Count the number of pixels with a certain minimum brightness in an image",
-    "Get marks of students"
+    "Download and run Llamafile model and create a tunnel using ngrok",
+    "Analyze sentiment of text using OpenAI's API",
+    "Count tokens and extract valid English words from text",
+    "Generate JSON body for OpenAI chat completion call to generate US addresses",
+    "Generate JSON body for OpenAI chat completion call to extract text from an image"
 ]
 
 @app.post("/api/")
@@ -669,8 +811,9 @@ def handle_api_request(question: str = Form(...), file: UploadFile = File(None))
 
         # Call the most similar function
         if most_similar_function == execute_excel_formula and file and file.filename.endswith('.xlsx'):
-            formula = question.split("formula: ")[1]
-            return execute_excel_formula(formula)
+            formula = question.split("formula: ")[1].split(" data: ")[0]
+            data = question.split("data: ")[1]
+            return execute_excel_formula(formula, data)
         elif most_similar_function == find_hidden_input and "url: " in question:
             url = question.split("url: ")[1]
             return find_hidden_input(url)
@@ -682,11 +825,9 @@ def handle_api_request(question: str = Form(...), file: UploadFile = File(None))
         elif most_similar_function == download_and_format_readme:
             return download_and_format_readme()
         elif most_similar_function == write_google_sheets_formula:
-            formula = question.split("formula: ")[1]
-            return write_google_sheets_formula(formula)
-        elif most_similar_function == write_excel_formula:
-            formula = question.split("formula: ")[1]
-            return write_excel_formula(formula)
+            formula = question.split("formula: ")[1].split(" data: ")[0]
+            data = question.split("data: ")[1]
+            return write_google_sheets_formula(formula, data)
         elif most_similar_function == count_weekdays_in_range:
             start_date, end_date, weekday = question.split(" ")[1:4]
             return count_weekdays_in_range(start_date, end_date, weekday)
@@ -730,8 +871,8 @@ def handle_api_request(question: str = Form(...), file: UploadFile = File(None))
             output_path = f'/tmp/compressed_{file.filename}'
             with open(image_path, 'wb') as f:
                 f.write(file.file.read())
-            compress_image(image_path, output_path)
-            return {"message": "Image compressed successfully", "output_path": output_path}
+            base64_encoded = compress_image(image_path, output_path)
+            return {"message": "Image compressed successfully", "base64_encoded": base64_encoded}
         elif most_similar_function == publish_github_pages:
             email = question.split("email: ")[1]
             github_token = question.split("token: ")[1]
@@ -749,6 +890,22 @@ def handle_api_request(question: str = Form(...), file: UploadFile = File(None))
         elif most_similar_function == get_marks:
             name = question.split("name: ")[1]
             return get_marks(name)
+        elif most_similar_function == create_and_push_docker_image:
+            dockerhub_username = question.split("username: ")[1].split(" password: ")[0]
+            dockerhub_password = question.split("password: ")[1].split(" repo: ")[0]
+            repo_name = question.split("repo: ")[1]
+            return create_and_push_docker_image(dockerhub_username, dockerhub_password, repo_name)
+        elif most_similar_function == download_and_run_llamafile_model:
+            return download_and_run_llamafile_model()
+        elif most_similar_function == analyze_sentiment:
+            return analyze_sentiment()
+        elif most_similar_function == count_tokens_and_valid_words:
+            text = question.split("text: ")[1]
+            return count_tokens_and_valid_words(text)
+        elif most_similar_function == llm_text_extraction:
+            return llm_text_extraction()
+        elif most_similar_function == llm_text_extraction_with_image and file:
+            return llm_text_extraction_with_image(file)
         else:
             return {"error": "Unsupported question format or file type"}
     except Exception as e:
