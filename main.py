@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi import FastAPI, UploadFile, File, Form, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 import subprocess
 import pandas as pd
@@ -15,8 +15,11 @@ from datetime import datetime, timedelta
 import json
 import hashlib
 from github import Github
+from bs4 import BeautifulSoup
 
 import sqlite3
+
+import tiktoken
 
 app = FastAPI()
 
@@ -25,13 +28,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
+    allow_methods=["OPTIONS", "POST", "GET"],  # Allow OPTIONS, POST, and GET methods
     allow_headers=["*"],  # Allow all headers
 )
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello, World!"}
+    return {"message": "Hello, students of TDS-2025-01!, Post your queries here."}
 
 # Load the pre-trained model
 model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -756,50 +759,819 @@ def llm_text_extraction_with_image(file: UploadFile):
     except Exception as e:
         return {"error": str(e)}
 
-functions_dict = {
-    "send_request": send_request,
-    "find_hidden_input": find_hidden_input,
-    "run_vscode": run_vscode,
-    "execute_excel_formula": execute_excel_formula,
-    "download_and_format_readme": download_and_format_readme,
-    "write_google_sheets_formula": write_google_sheets_formula,
-    "count_weekdays_in_range": count_weekdays_in_range,
-    "get_answer_from_csv": get_answer_from_csv,
-    "sort_json_array": sort_json_array,
-    "convert_to_json_and_hash": convert_to_json_and_hash,
-    "sum_data_value_attributes": sum_data_value_attributes,
-    "sum_values_from_files": sum_values_from_files,
-    "create_github_repo_and_commit": create_github_repo_and_commit,
-    "replace_iitm_with_iit_madras": replace_iitm_with_iit_madras,
-    "calculate_total_sales": calculate_total_sales,
-    "compare_files": compare_files,
-    "process_and_rename_files": process_and_rename_files,
-    "generate_markdown_documentation": generate_markdown_documentation,
-    "compress_image": compress_image,
-    "publish_github_pages": publish_github_pages,
-    "run_colab_code": run_colab_code,
-    "count_light_pixels": count_light_pixels,
-    "get_marks": get_marks,
-    "create_and_push_docker_image": create_and_push_docker_image,
-    "download_and_run_llamafile_model": download_and_run_llamafile_model,
-    "analyze_sentiment": analyze_sentiment,
-    "count_tokens_and_valid_words": count_tokens_and_valid_words,
-    "llm_text_extraction": llm_text_extraction,
-    "llm_text_extraction_with_image": llm_text_extraction_with_image
-}
+def generate_embedding_request(messages: list):
+    try:
+        json_body = {
+            "model": "text-embedding-3-small",
+            "input": messages
+        }
+        return json_body
+    except Exception as e:
+        return {"error": str(e)}
 
-function_descriptions = [
-    "Run VSCode",
-    "Send a request",
-    "Execute an Excel formula",
-    "Download and run Llamafile model and create a tunnel using ngrok",
-    "Analyze sentiment of text using OpenAI's API",
-    "Count tokens and extract valid English words from text",
-    "Generate JSON body for OpenAI chat completion call to generate US addresses",
-    "Generate JSON body for OpenAI chat completion call to extract text from an image"
-]
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
-@app.post("/api/")
+def most_similar(embeddings: dict):
+    try:
+        phrases = list(embeddings.keys())
+        vectors = np.array(list(embeddings.values()))
+
+        # Calculate cosine similarity matrix
+        similarity_matrix = cosine_similarity(vectors)
+
+        # Find the indices of the maximum similarity (excluding diagonal)
+        np.fill_diagonal(similarity_matrix, -np.inf)  # Exclude self-similarity
+        max_indices = np.unravel_index(np.argmax(similarity_matrix), similarity_matrix.shape)
+
+        # Return the pair of phrases with the highest similarity
+        return (phrases[max_indices[0]], phrases[max_indices[1]])
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/similarity")
+def compute_similarity(payload: dict):
+    try:
+        docs = payload.get("docs", [])
+        query = payload.get("query", "")
+
+        if not docs or not query:
+            return {"error": "Both 'docs' and 'query' must be provided."}
+
+        # Initialize the tokenizer
+        enc = tiktoken.get_encoding("text-embedding-3-small")
+
+        # Generate embeddings for documents and query
+        doc_embeddings = [enc.encode(doc) for doc in docs]
+        query_embedding = enc.encode(query)
+
+        # Convert embeddings to numpy arrays
+        doc_embeddings = np.array(doc_embeddings)
+        query_embedding = np.array(query_embedding).reshape(1, -1)
+
+        # Compute cosine similarity
+        similarity_scores = cosine_similarity(query_embedding, doc_embeddings).flatten()
+
+        # Get indices of the top 3 most similar documents
+        top_indices = similarity_scores.argsort()[-3:][::-1]
+
+        # Return the top 3 matches
+        matches = [docs[i] for i in top_indices]
+        return {"matches": matches}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/execute")
+def execute_query(q: str):
+    try:
+        # Match the query to the appropriate function
+        if match := re.match(r"What is the status of ticket (\d+)\?", q):
+            ticket_id = int(match.group(1))
+            return {"name": "get_ticket_status", "arguments": json.dumps({"ticket_id": ticket_id})}
+        elif match := re.match(r"Schedule a meeting on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}) in Room ([A-Z])\.", q):
+            date, time, meeting_room = match.groups()
+            return {"name": "schedule_meeting", "arguments": json.dumps({"date": date, "time": time, "meeting_room": meeting_room})}
+        elif match := re.match(r"Show my expense balance for employee (\d+)\.", q):
+            employee_id = int(match.group(1))
+            return {"name": "get_expense_balance", "arguments": json.dumps({"employee_id": employee_id})}
+        elif match := re.match(r"Calculate performance bonus for employee (\d+) for (\d{4})\.", q):
+            employee_id, current_year = map(int, match.groups())
+            return {"name": "calculate_performance_bonus", "arguments": json.dumps({"employee_id": employee_id, "current_year": current_year})}
+        elif match := re.match(r"Report office issue (\d+) for the (\w+) department\.", q):
+            issue_code = int(match.group(1))
+            department = match.group(2)
+            return {"name": "report_office_issue", "arguments": json.dumps({"issue_code": issue_code, "department": department})}
+        else:
+            return {"error": "Query not recognized"}
+    except Exception as e:
+        return {"error": str(e)}
+
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+
+def count_stat_from_cricinfo(page_number: int, stat_column: str):
+    try:
+        # Construct the URL for the given page number
+        url = f"https://stats.espncricinfo.com/ci/engine/stats/index.html?class=2;page={page_number};template=results;type=batting"
+
+        # Fetch the page content
+        response = requests.get(url)
+        response.raise_for_status()
+
+        # Parse the HTML content using BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Locate the table containing the stats
+        table = soup.find('table', class_='engineTable')
+        if not table:
+            return {"error": "Stats table not found on the page."}
+
+        # Convert the table to a DataFrame
+        df = pd.read_html(str(table))[0]
+
+        # Check if the stat column exists
+        if stat_column not in df.columns:
+            return {"error": f"Column '{stat_column}' not found in the table."}
+
+        # Sum the values in the specified column
+        total_stat = df[stat_column].sum()
+
+        return {"total": total_stat}
+    except Exception as e:
+        return {"error": str(e)}
+
+def extract_movie_data(rating_filter: str, fields: list):
+    try:
+        # Construct the IMDb search URL based on the rating filter
+        url = f"https://www.imdb.com/search/title/?user_rating={rating_filter}"
+
+        # Fetch the page content
+        response = requests.get(url)
+        response.raise_for_status()
+
+        # Parse the HTML content using BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Locate the movie containers
+        movie_containers = soup.find_all('div', class_='lister-item mode-advanced')
+
+        # Extract data for up to the first 25 movies
+        movies = []
+        for container in movie_containers[:25]:
+            movie_data = {}
+
+            # Extract the IMDb ID
+            link = container.h3.a['href']
+            movie_data['id'] = link.split('/title/tt')[1].split('/')[0]
+
+            # Extract the title
+            if 'title' in fields:
+                movie_data['title'] = container.h3.a.text
+
+            # Extract the year
+            if 'year' in fields:
+                year = container.h3.find('span', class_='lister-item-year').text
+                movie_data['year'] = year.strip('()')
+
+            # Extract the rating
+            if 'rating' in fields:
+                rating = container.find('div', class_='inline-block ratings-imdb-rating')
+                movie_data['rating'] = rating['data-value'] if rating else None
+
+            movies.append(movie_data)
+
+        return movies
+    except Exception as e:
+        return {"error": str(e)}
+
+import requests
+
+def get_weather_forecast(city: str, api_key: str):
+    try:
+        # Step 1: Fetch the locationId for the city
+        locator_url = "https://api.bbcweather.com/locator"
+        locator_params = {
+            "apiKey": api_key,
+            "locale": "en",
+            "filter": "city",
+            "searchTerm": city
+        }
+        locator_response = requests.get(locator_url, params=locator_params)
+        locator_response.raise_for_status()
+        location_data = locator_response.json()
+
+        # Extract locationId
+        location_id = location_data["locationId"]
+
+        # Step 2: Fetch the weather forecast using the locationId
+        weather_url = f"https://api.bbcweather.com/weather/{location_id}"
+        weather_params = {
+            "apiKey": api_key
+        }
+        weather_response = requests.get(weather_url, params=weather_params)
+        weather_response.raise_for_status()
+        weather_data = weather_response.json()
+
+        # Step 3: Extract and transform the weather data
+        forecasts = weather_data.get("forecasts", [])
+        weather_forecast = {
+            forecast["localDate"]: forecast["enhancedWeatherDescription"]
+            for forecast in forecasts
+        }
+
+        return weather_forecast
+    except Exception as e:
+        return {"error": str(e)}
+
+import requests
+
+def get_min_latitude(city: str, country: str, parameter: str):
+    try:
+        # Construct the Nominatim API URL
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {
+            "q": f"{city}, {country}",
+            "format": "json",
+            "addressdetails": 1,
+            "limit": 1
+        }
+
+        # Fetch the geospatial data
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        if not data:
+            return {"error": "No results found for the specified city and country."}
+
+        # Extract the bounding box
+        bounding_box = data[0].get("boundingbox", [])
+        if not bounding_box:
+            return {"error": "Bounding box not found in the response."}
+
+        # Extract the required parameter (e.g., minimum latitude)
+        if parameter == "min_latitude":
+            return {"min_latitude": float(bounding_box[0])}
+        elif parameter == "max_latitude":
+            return {"max_latitude": float(bounding_box[1])}
+        elif parameter == "min_longitude":
+            return {"min_longitude": float(bounding_box[2])}
+        elif parameter == "max_longitude":
+            return {"max_longitude": float(bounding_box[3])}
+        else:
+            return {"error": "Invalid parameter specified."}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+import requests
+import xml.etree.ElementTree as ET
+
+def get_latest_hn_post(topic: str, min_points: int):
+    try:
+        # Fetch the latest Hacker News posts using the HNRSS API
+        url = "https://hnrss.org/newest"
+        response = requests.get(url)
+        response.raise_for_status()
+
+        # Parse the XML response
+        root = ET.fromstring(response.content)
+
+        # Iterate through the <item> elements
+        for item in root.findall(".//item"):
+            title = item.find("title").text
+            link = item.find("link").text
+            points = item.find("hn:points", namespaces={"hn": "https://hnrss.org/"}).text
+
+            # Check if the title contains the topic and points meet the minimum threshold
+            if topic.lower() in title.lower() and int(points) >= min_points:
+                return link
+
+        return {"error": "No matching post found."}
+    except Exception as e:
+        return {"error": str(e)}
+
+import requests
+
+def get_github_user_by_date(city: str, min_followers: int, github_token: str, date_type: str):
+    try:
+        # Construct the GitHub API URL
+        url = "https://api.github.com/search/users"
+        headers = {
+            "Authorization": f"Bearer {github_token}",
+            "Accept": "application/vnd.github+json"
+        }
+        params = {
+            "q": f"location:{city} followers:>{min_followers}",
+            "sort": "joined",
+            "order": "desc" if date_type == "newest" else "asc"
+        }
+
+        # Fetch the user data
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        if not data.get("items"):
+            return {"error": "No users found matching the criteria."}
+
+        # Get the user (first in the sorted list)
+        user = data["items"][0]
+        user_details_url = user["url"]
+
+        # Fetch detailed user data
+        user_response = requests.get(user_details_url, headers=headers)
+        user_response.raise_for_status()
+        user_data = user_response.json()
+
+        # Extract the creation date
+        created_at = user_data["created_at"]
+
+        return {"user_created_at": created_at}
+    except Exception as e:
+        return {"error": str(e)}
+    
+
+import os
+import subprocess
+
+def create_github_action(email: str, github_repo_url: str):
+    try:
+        # Define the GitHub Actions workflow content
+        workflow_content = f'''
+name: Daily Commit
+
+on:
+  schedule:
+    - cron: "0 0 * * *"  # Runs daily at midnight
+
+jobs:
+  daily-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Git user
+      run: |
+        git config --global user.name "GitHub Action"
+        git config --global user.email "{email}"
+
+    - name: Make a commit
+      run: |
+        date > date.txt
+        git add date.txt
+        git commit -m "Daily commit"
+        git push
+'''
+
+        # Create the .github/workflows directory if it doesn't exist
+        workflows_dir = ".github/workflows"
+        os.makedirs(workflows_dir, exist_ok=True)
+
+        # Write the workflow file
+        workflow_path = os.path.join(workflows_dir, "daily-commit.yml")
+        with open(workflow_path, "w") as workflow_file:
+            workflow_file.write(workflow_content)
+
+        # Add, commit, and push the workflow file to the repository
+        subprocess.run(["git", "add", workflow_path], check=True)
+        subprocess.run(["git", "commit", "-m", "Add daily commit GitHub Action"], check=True)
+        subprocess.run(["git", "push"], check=True)
+
+        return {"repository_url": github_repo_url}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+import tabula
+
+def calculate_total_marks(file: UploadFile, subject: str, filter_subject: str, min_marks: int, group_range: tuple):
+    try:
+        # Save the uploaded PDF file temporarily
+        pdf_path = f"/tmp/{file.filename}"
+        with open(pdf_path, "wb") as f:
+            f.write(file.file.read())
+
+        # Extract tables from the PDF using Tabula
+        tables = tabula.read_pdf(pdf_path, pages="all", multiple_tables=True, pandas_options={"header": 0})
+
+        # Combine all tables into a single DataFrame
+        df = pd.concat(tables, ignore_index=True)
+
+        # Ensure marks are numeric
+        df[filter_subject] = pd.to_numeric(df[filter_subject], errors="coerce")
+        df[subject] = pd.to_numeric(df[subject], errors="coerce")
+        df["Group"] = pd.to_numeric(df["Group"], errors="coerce")
+
+        # Filter students based on the criteria
+        filtered_df = df[(df[filter_subject] >= min_marks) & (df["Group"] >= group_range[0]) & (df["Group"] <= group_range[1])]
+
+        # Calculate the total marks for the specified subject
+        total_marks = filtered_df[subject].sum()
+
+        return {"total_marks": total_marks}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+import subprocess
+from markdownify import markdownify as md
+import fitz  # PyMuPDF
+
+def convert_pdf_to_markdown(file: UploadFile):
+    try:
+        # Save the uploaded PDF file temporarily
+        pdf_path = f"/tmp/{file.filename}"
+        with open(pdf_path, "wb") as f:
+            f.write(file.file.read())
+
+        # Extract text from the PDF using PyMuPDF
+        doc = fitz.open(pdf_path)
+        text = ""
+        for page in doc:
+            text += page.get_text()
+
+        # Convert the extracted text to Markdown
+        markdown_content = md(text)
+
+        # Save the Markdown content to a temporary file
+        markdown_path = pdf_path.replace(".pdf", ".md")
+        with open(markdown_path, "w") as md_file:
+            md_file.write(markdown_content)
+
+        # Format the Markdown file using Prettier
+        subprocess.run(["npx", "-y", "prettier@3.4.2", "--write", markdown_path], check=True)
+
+        # Read the formatted Markdown content
+        with open(markdown_path, "r") as formatted_md_file:
+            formatted_markdown = formatted_md_file.read()
+
+        return {"formatted_markdown": formatted_markdown}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+import pandas as pd
+from datetime import datetime
+from fastapi import UploadFile
+
+def calculate_total_margin(file: UploadFile, product: str, country: str, time_filter: str):
+    try:
+        # Save the uploaded Excel file temporarily
+        excel_path = f"/tmp/{file.filename}"
+        with open(excel_path, "wb") as f:
+            f.write(file.file.read())
+
+        # Load the Excel file into a DataFrame
+        df = pd.read_excel(excel_path)
+
+        # Trim and normalize strings in Customer Name and Country fields
+        df['Customer Name'] = df['Customer Name'].str.strip()
+        df['Country'] = df['Country'].str.strip().replace({"USA": "US", "U.S.A": "US"})
+
+        # Standardize date formats
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce', dayfirst=False, infer_datetime_format=True)
+
+        # Extract the product name before the slash
+        df['Product'] = df['Product'].str.split('/').str[0].str.strip()
+
+        # Clean and convert Sales and Cost fields
+        df['Sales'] = df['Sales'].str.replace('USD', '').str.strip().astype(float)
+        df['Cost'] = df['Cost'].str.replace('USD', '').str.strip()
+        df['Cost'] = pd.to_numeric(df['Cost'], errors='coerce')
+        df['Cost'].fillna(df['Sales'] * 0.5, inplace=True)
+
+        # Filter the data based on the criteria
+        time_filter_date = datetime.strptime(time_filter, "%a %b %d %Y %H:%M:%S %Z%z")
+        filtered_df = df[(df['Date'] <= time_filter_date) &
+                         (df['Product'] == product) &
+                         (df['Country'] == country)]
+
+        # Calculate the total margin
+        total_sales = filtered_df['Sales'].sum()
+        total_cost = filtered_df['Cost'].sum()
+        total_margin = (total_sales - total_cost) / total_sales if total_sales > 0 else 0
+
+        return {"total_margin": total_margin}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+import gzip
+import re
+from datetime import datetime
+from fastapi import UploadFile
+
+def count_successful_get_requests(file: UploadFile, language: str, day: str, start_time: str, end_time: str):
+    try:
+        # Save the uploaded GZipped log file temporarily
+        gz_path = f"/tmp/{file.filename}"
+        with open(gz_path, "wb") as f:
+            f.write(file.file.read())
+
+        # Open and read the GZipped file
+        with gzip.open(gz_path, "rt", encoding="utf-8") as gz_file:
+            logs = gz_file.readlines()
+
+        # Compile regex to parse log entries
+        log_pattern = re.compile(
+            r'(?P<ip>\S+) (?P<logname>\S+) (?P<user>\S+) \[(?P<time>.+?)\] "(?P<method>\S+) (?P<url>\S+) (?P<protocol>\S+)" (?P<status>\d+) (?P<size>\S+) "(?P<referer>.*?)" "(?P<user_agent>.*?)" (?P<vhost>\S+) (?P<server>\S+)'
+        )
+
+        # Convert start and end times to datetime objects
+        start_time_obj = datetime.strptime(start_time, "%H:%M")
+        end_time_obj = datetime.strptime(end_time, "%H:%M")
+
+        # Initialize counter for successful GET requests
+        successful_get_count = 0
+
+        for log in logs:
+            match = log_pattern.match(log)
+            if not match:
+                continue
+
+            log_data = match.groupdict()
+
+            # Filter by method, status, and URL
+            if log_data["method"] != "GET" or not (200 <= int(log_data["status"]) < 300):
+                continue
+
+            if not log_data["url"].startswith(f"/{language}/"):
+                continue
+
+            # Parse the time and filter by day and time range
+            log_time = datetime.strptime(log_data["time"], "%d/%b/%Y:%H:%M:%S %z")
+            log_time = log_time.astimezone()  # Convert to local timezone
+
+            if log_time.strftime("%A") != day:
+                continue
+
+            if not (start_time_obj.time() <= log_time.time() < end_time_obj.time()):
+                continue
+
+            # Increment the counter
+            successful_get_count += 1
+
+        return {"successful_get_requests": successful_get_count}
+    except Exception as e:
+        return {"error": str(e)}
+
+import gzip
+from collections import defaultdict
+
+def top_ip_data_consumer(file: UploadFile, language: str, date: str):
+    try:
+        # Save the uploaded GZipped log file temporarily
+        gz_path = f"/tmp/{file.filename}"
+        with open(gz_path, "wb") as f:
+            f.write(file.file.read())
+
+        # Open and read the GZipped file
+        with gzip.open(gz_path, "rt", encoding="utf-8") as gz_file:
+            logs = gz_file.readlines()
+
+        # Compile regex to parse log entries
+        log_pattern = re.compile(
+            r'(?P<ip>\S+) (?P<logname>\S+) (?P<user>\S+) \[(?P<time>.+?)\] "(?P<method>\S+) (?P<url>\S+) (?P<protocol>\S+)" (?P<status>\d+) (?P<size>\S+) "(?P<referer>.*?)" "(?P<user_agent>.*?)" (?P<vhost>\S+) (?P<server>\S+)'
+        )
+
+        # Initialize a dictionary to aggregate data by IP
+        ip_data = defaultdict(int)
+
+        for log in logs:
+            match = log_pattern.match(log)
+            if not match:
+                continue
+
+            log_data = match.groupdict()
+
+            # Filter by URL and date
+            if not log_data["url"].startswith(f"/{language}/"):
+                continue
+
+            log_time = datetime.strptime(log_data["time"], "%d/%b/%Y:%H:%M:%S %z")
+            log_time = log_time.astimezone()  # Convert to local timezone
+
+            if log_time.strftime("%Y-%m-%d") != date:
+                continue
+
+            # Aggregate the size by IP
+            size = int(log_data["size"]) if log_data["size"].isdigit() else 0
+            ip_data[log_data["ip"]] += size
+
+        # Identify the top data consumer
+        top_ip = max(ip_data, key=ip_data.get, default=None)
+        top_bytes = ip_data[top_ip] if top_ip else 0
+
+        return {"top_ip": top_ip, "total_bytes": top_bytes}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/outline")
+def create_country_outline_api(country: str = Query(..., description="The name of the country")):
+    try:
+        # Construct the Wikipedia URL for the country
+        wikipedia_url = f"https://en.wikipedia.org/wiki/{country.replace(' ', '_')}"
+
+        # Fetch the Wikipedia page content
+        response = requests.get(wikipedia_url)
+        response.raise_for_status()
+
+        # Parse the HTML content using BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Extract all headings (H1 to H6) from the page
+        headings = []
+        for level in range(1, 7):
+            for heading in soup.find_all(f'h{level}'):
+                headings.append((level, heading.text.strip()))
+
+        # Generate the Markdown outline
+        markdown_outline = ["## Contents", f"# {country}"]
+        for level, text in headings:
+            markdown_outline.append(f"{'#' * level} {text}")
+
+        return {"markdown_outline": "\n".join(markdown_outline), "endpoint": "http://127.0.0.1:8000/api/outline"}
+    except Exception as e:
+        return {"error": str(e)}
+
+import pandas as pd
+from fastapi import UploadFile
+from fuzzywuzzy import process
+import json
+
+def aggregate_sales_by_city(file: UploadFile, product: str, min_units: int, city: str):
+    try:
+        # Save the uploaded JSON file temporarily
+        json_path = f"/tmp/{file.filename}"
+        with open(json_path, "wb") as f:
+            f.write(file.file.read())
+
+        # Load the JSON file into a DataFrame
+        with open(json_path, "r") as f:
+            data = json.load(f)
+        df = pd.DataFrame(data)
+
+        # Normalize city names using phonetic clustering
+        unique_cities = df['city'].unique()
+        city_mapping = {}
+        for unique_city in unique_cities:
+            best_match = process.extractOne(unique_city, unique_cities)[0]
+            city_mapping[unique_city] = best_match
+
+        df['city'] = df['city'].map(city_mapping)
+
+        # Filter the dataset based on the criteria
+        filtered_df = df[(df['product'] == product) & (df['sales'] >= min_units)]
+
+        # Aggregate sales by city
+        aggregated_sales = filtered_df.groupby('city')['sales'].sum()
+
+        # Get the sales for the specified city
+        total_sales = aggregated_sales.get(city, 0)
+
+        return {"total_sales": total_sales}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+import json
+
+def calculate_total_sales_from_jsonl(file: UploadFile):
+    try:
+        # Save the uploaded JSONL file temporarily
+        jsonl_path = f"/tmp/{file.filename}"
+        with open(jsonl_path, "wb") as f:
+            f.write(file.file.read())
+
+        # Read and parse the JSONL file
+        total_sales = 0
+        with open(jsonl_path, "r") as f:
+            for line in f:
+                try:
+                    # Attempt to parse the JSON line
+                    data = json.loads(line.strip())
+                except json.JSONDecodeError:
+                    # If parsing fails, try to fix the line
+                    fixed_line = line.strip()
+                    if not fixed_line.endswith('}'):
+                        fixed_line += '}'
+                    if not fixed_line.startswith('{'):
+                        fixed_line = '{' + fixed_line
+                    data = json.loads(fixed_line)
+
+                # Add the sales value if it exists
+                total_sales += data.get("sales", 0)
+
+        return {"total_sales": total_sales}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+import json
+
+def count_key_occurrences(file: UploadFile, key: str):
+    try:
+        # Save the uploaded JSON file temporarily
+        json_path = f"/tmp/{file.filename}"
+        with open(json_path, "wb") as f:
+            f.write(file.file.read())
+
+        # Load the JSON file
+        with open(json_path, "r") as f:
+            data = json.load(f)
+
+        # Recursive function to count key occurrences
+        def count_key(data, key):
+            if isinstance(data, dict):
+                return sum((1 if k == key else 0) + count_key(v, key) for k, v in data.items())
+            elif isinstance(data, list):
+                return sum(count_key(item, key) for item in data)
+            return 0
+
+        # Count the occurrences of the key
+        total_count = count_key(data, key)
+
+        return {"key_occurrences": total_count}
+    except Exception as e:
+        return {"error": str(e)}
+
+def generate_duckdb_query(date: str, time: str, stars: int):
+    try:
+        # Combine date and time into a single timestamp
+        timestamp = f"{date}T{time}"
+
+        # Generate the DuckDB SQL query
+        query = f"""
+        SELECT post_id
+        FROM (
+            SELECT post_id, json_extract(comments, '$[*].stars.useful') AS useful_stars
+            FROM social_media 
+            WHERE timestamp > '{timestamp}'
+        ) 
+        WHERE EXISTS (
+            SELECT 1 
+            FROM UNNEST(useful_stars) AS t(value)
+            WHERE CAST(value AS INTEGER) >= {stars}
+        )
+        ORDER BY post_id;
+        """
+
+        return {"query": query}
+    except Exception as e:
+        return {"error": str(e)}
+
+import base64
+from PIL import Image
+import numpy as np
+
+def reconstruct_image(image_path: str, mapping: list):
+    try:
+        # Open the scrambled image
+        scrambled_image = Image.open(image_path)
+
+        # Define the size of each piece
+        piece_size = scrambled_image.width // 5
+
+        # Create a blank image for the reconstructed image
+        reconstructed_image = Image.new('RGB', (scrambled_image.width, scrambled_image.height))
+
+        # Reconstruct the image based on the mapping
+        for original_row, original_col, scrambled_row, scrambled_col in mapping:
+            # Extract the piece from the scrambled image
+            left = scrambled_col * piece_size
+            upper = scrambled_row * piece_size
+            right = left + piece_size
+            lower = upper + piece_size
+            piece = scrambled_image.crop((left, upper, right, lower))
+
+            # Paste the piece into the reconstructed image
+            left = original_col * piece_size
+            upper = original_row * piece_size
+            reconstructed_image.paste(piece, (left, upper))
+
+        # Save the reconstructed image to a temporary path
+        reconstructed_path = "/tmp/reconstructed_image.png"
+        reconstructed_image.save(reconstructed_path)
+
+        # Convert the reconstructed image to base64 encoding
+        with open(reconstructed_path, "rb") as img_file:
+            base64_encoded_image = base64.b64encode(img_file.read()).decode('utf-8')
+
+        return {"base64_encoded_image": base64_encoded_image}
+    except Exception as e:
+        return {"error": str(e)}
+
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+import json
+
+app = FastAPI()
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["OPTIONS", "POST"],  # Allow OPTIONS and POST methods
+    allow_headers=["*"],  # Allow all headers
+)
+
+# Load the pre-trained model
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Function descriptions and mapping
+functions_dict = {}
+function_descriptions = []
+
+# Main /api endpoint
+@app.post("/api")
 def handle_api_request(question: str = Form(...), file: UploadFile = File(None)):
     try:
         # Calculate similarity between the question and function descriptions using embeddings
@@ -810,105 +1582,22 @@ def handle_api_request(question: str = Form(...), file: UploadFile = File(None))
         most_similar_function = list(functions_dict.values())[most_similar_function_index]
 
         # Call the most similar function
-        if most_similar_function == execute_excel_formula and file and file.filename.endswith('.xlsx'):
-            formula = question.split("formula: ")[1].split(" data: ")[0]
-            data = question.split("data: ")[1]
-            return execute_excel_formula(formula, data)
-        elif most_similar_function == find_hidden_input and "url: " in question:
-            url = question.split("url: ")[1]
-            return find_hidden_input(url)
-        elif most_similar_function == send_request:
-            email = question.split("email: ")[1]
-            return send_request(email)
-        elif most_similar_function == run_vscode:
-            return run_vscode()
-        elif most_similar_function == download_and_format_readme:
-            return download_and_format_readme()
-        elif most_similar_function == write_google_sheets_formula:
-            formula = question.split("formula: ")[1].split(" data: ")[0]
-            data = question.split("data: ")[1]
-            return write_google_sheets_formula(formula, data)
-        elif most_similar_function == count_weekdays_in_range:
-            start_date, end_date, weekday = question.split(" ")[1:4]
-            return count_weekdays_in_range(start_date, end_date, weekday)
-        elif most_similar_function == get_answer_from_csv and "url: " in question:
-            zip_url = question.split("url: ")[1]
-            return get_answer_from_csv(zip_url)
-        elif most_similar_function == sort_json_array:
-            json_array = json.loads(question.split("json: ")[1])
-            return sort_json_array(json_array)
-        elif most_similar_function == convert_to_json_and_hash and file and file.filename.endswith('.txt'):
-            file_path = f'/tmp/{file.filename}'
-            with open(file_path, 'wb') as f:
-                f.write(file.file.read())
-            return convert_to_json_and_hash(file_path)
-        elif most_similar_function == sum_data_value_attributes:
-            return sum_data_value_attributes()
-        elif most_similar_function == sum_values_from_files and "url: " in question:
-            zip_url = question.split("url: ")[1]
-            return sum_values_from_files(zip_url)
-        elif most_similar_function == create_github_repo_and_commit:
-            email = question.split("email: ")[1]
-            github_token = question.split("token: ")[1]
-            repo_name = question.split("repo: ")[1]
-            return create_github_repo_and_commit(email, github_token, repo_name)
-        elif most_similar_function == replace_iitm_with_iit_madras and "url: " in question:
-            zip_url = question.split("url: ")[1]
-            return replace_iitm_with_iit_madras(zip_url)
-        elif most_similar_function == calculate_total_sales and "db_path: " in question:
-            db_path, ticket_type = question.split("db_path: ")[1].split(" ticket_type: ")
-            return calculate_total_sales(db_path, ticket_type)
-        elif most_similar_function == compare_files and "url: " in question:
-            zip_url, comparison_type = question.split("url: ")[1].split(" comparison_type: ")
-            return compare_files(zip_url, comparison_type)
-        elif most_similar_function == process_and_rename_files and "url: " in question:
-            zip_url = question.split("url: ")[1]
-            return process_and_rename_files(zip_url)
-        elif most_similar_function == generate_markdown_documentation:
-            return generate_markdown_documentation()
-        elif most_similar_function == compress_image and file and file.filename.endswith(('.png', '.jpg', '.jpeg')):
-            image_path = f'/tmp/{file.filename}'
-            output_path = f'/tmp/compressed_{file.filename}'
-            with open(image_path, 'wb') as f:
-                f.write(file.file.read())
-            base64_encoded = compress_image(image_path, output_path)
-            return {"message": "Image compressed successfully", "base64_encoded": base64_encoded}
-        elif most_similar_function == publish_github_pages:
-            email = question.split("email: ")[1]
-            github_token = question.split("token: ")[1]
-            repo_name = question.split("repo: ")[1]
-            return publish_github_pages(email, github_token, repo_name)
-        elif most_similar_function == run_colab_code:
-            return {"result": run_colab_code()}
-        elif most_similar_function == count_light_pixels and file and file.filename.endswith(('.png', '.jpg', '.jpeg')):
-            image_path = f'/tmp/{file.filename}'
-            with open(image_path, 'wb') as f:
-                f.write(file.file.read())
-            threshold = float(question.split("threshold: ")[1]) if "threshold: " in question else 0.05
-            light_pixels = count_light_pixels(image_path, threshold)
-            return {"light_pixels": light_pixels}
-        elif most_similar_function == get_marks:
-            name = question.split("name: ")[1]
-            return get_marks(name)
-        elif most_similar_function == create_and_push_docker_image:
-            dockerhub_username = question.split("username: ")[1].split(" password: ")[0]
-            dockerhub_password = question.split("password: ")[1].split(" repo: ")[0]
-            repo_name = question.split("repo: ")[1]
-            return create_and_push_docker_image(dockerhub_username, dockerhub_password, repo_name)
-        elif most_similar_function == download_and_run_llamafile_model:
-            return download_and_run_llamafile_model()
-        elif most_similar_function == analyze_sentiment:
-            return analyze_sentiment()
-        elif most_similar_function == count_tokens_and_valid_words:
-            text = question.split("text: ")[1]
-            return count_tokens_and_valid_words(text)
-        elif most_similar_function == llm_text_extraction:
-            return llm_text_extraction()
-        elif most_similar_function == llm_text_extraction_with_image and file:
-            return llm_text_extraction_with_image(file)
+        if file:
+            return most_similar_function(file=file, question=question)
         else:
-            return {"error": "Unsupported question format or file type"}
+            return most_similar_function(question=question)
     except Exception as e:
         return {"error": str(e)}
+
+# Register functions
+functions_dict.update({
+    "compute_similarity": lambda **kwargs: {"api_link": "http://127.0.0.1:8000/similarity"},
+    "execute_query": lambda **kwargs: {"api_link": "http://127.0.0.1:8000/execute"}
+})
+
+function_descriptions.extend([
+    "Compute similarity between documents and a query",
+    "Execute a query and return the result"
+])
 
 
